@@ -1,55 +1,51 @@
+import face_recognition
 import cv2
 import numpy as np
 import os
 
 IMAGES_DIR = 'known_faces'
-FACE_CASCADE = cv2.CascadeClassifier('haarcascade_frontalface_default.xml')
 EXIT_KEY = "q"
+SCALE_FACTOR = 0.5
 
-# Load the known face images and convert them to grayscale
+# Load the known face images and encodings
 known_faces = []
 known_names = []
 for filename in os.listdir(IMAGES_DIR):
     image_path = os.path.join(IMAGES_DIR, filename)
 
-    image = cv2.imread(image_path)
-    image_gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    image = face_recognition.load_image_file(image_path)
+    encoding = face_recognition.face_encodings(image)[0]
 
     known_names.append(filename.split(".")[0])
-    known_faces.append(image_gray)
-    
+    known_faces.append(encoding)
+
 camera = cv2.VideoCapture(0)
 
 while True:
     ret, frame = camera.read()
-
-    # Convert the frame to grayscale
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
-    # Detect faces in the frame
-    faces = FACE_CASCADE.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=7)
+    frame = cv2.resize(frame, None, fx=SCALE_FACTOR, fy=SCALE_FACTOR)
+    
+    # Find all the faces and their encodings in the current frame
+    face_locations = face_recognition.face_locations(frame)
+    face_encodings = face_recognition.face_encodings(frame, face_locations)
 
     # Iterate over each detected face
-    for (i, (x, y, w, h)) in enumerate(faces):
-        # Extract the face region from the frame and resize it to the same size as the known face images
-        face = gray[y:y+h, x:x+w]
-        face_resized = cv2.resize(face, known_faces[0].shape[::-1])
+    for (i, face_encoding) in enumerate(face_encodings):
+        # Determine if the face is a match for any known face
+        matches = face_recognition.compare_faces(known_faces, face_encoding, tolerance=0.6)
 
-        # Compute the mean squared error (MSE) between the detected face and each known face image
-        mse_list = []
-        for known_face in known_faces:
-            diff = cv2.absdiff(known_face, face_resized)
-            mse = np.mean(diff)
-            mse_list.append(mse)
-
-        # Determine the best match for the detected face
-        best_match_idx = np.argmin(mse_list)
-        if mse_list[best_match_idx] < 100:
-            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-            cv2.putText(frame, f'{known_names[best_match_idx]}', (x, y+h+30), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
+        if len(known_faces) == 0:  # Check if there are no known faces
+            name = "Unknown"
         else:
-            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 0, 255), 2)
-            cv2.putText(frame, 'No match', (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
+            # Determine the best match for the detected face
+            best_match_idx = np.argmin(face_recognition.face_distance(known_faces, face_encoding))
+            if matches[best_match_idx]:
+                name = known_names[best_match_idx] 
+            else:
+                name = "Unknown"
+        
+        cv2.rectangle(frame, (face_locations[i][3], face_locations[i][0]), (face_locations[i][1], face_locations[i][2]), (0, 255, 0), 2)
+        cv2.putText(frame, name, (face_locations[i][3], face_locations[i][2]+30), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
 
     # Display the resulting frame
     cv2.imshow('Face Recognition', frame)
@@ -58,5 +54,5 @@ while True:
     if cv2.waitKey(1) == ord(EXIT_KEY):
         break
 
-cap.release()
+camera.release()
 cv2.destroyAllWindows()
